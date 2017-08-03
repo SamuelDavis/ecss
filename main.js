@@ -1,121 +1,115 @@
-/**
+class Clock {
+    constructor(timing, cb) {
+        this.timing = timing;
+        this._lag = this.timing;
+        this.cb = cb;
+        this._timeout = null;
+    }
 
- game_state == {};
- system == function(game_state) => game_state
- scene == [system]
+    static getTimestamp() {
+        return window.performance
+            ? window.performance.now()
+            : new Date().getTime();
+    }
 
- */
+    start() {
+        if (!this._timeout) {
+            this._tick();
+        }
+        return this;
+    }
+
+    stop() {
+        if (this._timeout) {
+            this._timeout = window.clearTimeout(this._timeout);
+        }
+        return this;
+    }
+
+    _tick(last = Clock.getTimestamp()) {
+        const current = Clock.getTimestamp();
+        this._lag += current - last - this.timing;
+        const pacing = this.timing - Math.max(0, this._lag);
+        this.cb();
+        this._timeout = window.setTimeout(this._tick.bind(this, current), pacing);
+    }
+}
+
+class Renderer {
+    constructor(screen, speed = 16) {
+        this.speed = speed;
+        this._screen = screen;
+    }
+
+    draw(state) {
+        this._screen.innerHTML = JSON.stringify(state, null, 2);
+    }
+}
+
+function timeSystem(state) {
+    return Object.assign({}, state, {now: Clock.getTimestamp()});
+}
+
+function eventSystem({events = []}) {
+    const newEvents = eventBus.splice(0, eventBus.length);
+    return Object.assign({}, arguments[0], {events: events.concat(newEvents)});
+}
+
+const defaultScene = [timeSystem, eventSystem];
+
+class Game {
+    constructor({speed = 8, scene = defaultScene} = {}) {
+        this._state = {speed, scene};
+    }
+
+    update() {
+        this._state = this._state.scene.reduce((state, system) => system(state), this._state);
+    }
+
+    getState() {
+        return this._state;
+    }
+}
 
 const eventBus = [];
 
-function canWalk(entityState, gameState) {
-    const change = {};
-    gameState.events.forEach(event => {
-        if (event.name === 'MOVE NORTH') {
-            change.y = (entityState.y || 0) - 1
-        }
-        if (event.keyCode === 65) {
-            change.x = (entityState.x || 0) - 1
-        }
-        if (event.keyCode === 83) {
-            change.y = (entityState.y || 0) + 1
-        }
-        if (event.keyCode === 68) {
-            change.x = (entityState.x || 0) + 1
-        }
-    });
-    return Object.assign({}, entityState, change);
-}
-
-function canJump(entityState, gameState) {
-    const change = {};
-    gameState.events.forEach(event => {
-        if (event.keyCode === 32) {
-            change.z = (entityState.z || 0) + 1
-        }
-    });
-    return Object.assign({}, entityState, change);
-}
-
-const fooEntity = [canWalk, canJump];
-
-/** SYSTEMS */
-function eventSystem(state) {
-    const events = eventBus
-        .splice(0, eventBus.length)
-        .map(({keyCode, metaKey, shiftKey, altKey}) => ({keyCode, metaKey, shiftKey, altKey}));
-    return Object.assign({}, state, {events});
-}
-
-function inputSystem(state) {
-    return Object.assign({}, state, {input: ((state.input || 0) + 1) % 1000});
-}
-
-function menuSystem(state) {
-    const change = {menu: ((state.menu || 0) + 1) % 1000};
-    if (change.menu >= 360) {
-        change.scene = playScene;
-        window.addEventListener('keydown', eventBus.push.bind(eventBus));
+class KeyBoardInput {
+    constructor() {
+        this.down = {};
+        this.id = Clock.getTimestamp();
+        window.addEventListener('keydown', ({keyCode}) => {
+            if (!Boolean(this.down[keyCode])) {
+                this.pressed(keyCode);
+            }
+            this.down[keyCode] = true;
+        });
+        window.addEventListener('keyup', ({keyCode}) => {
+            if (Boolean(this.down[keyCode])) {
+                this.released(keyCode);
+            }
+            this.down[keyCode] = false;
+        });
     }
-    return Object.assign({}, state, change);
+
+    pressed(keyCode) {
+        eventBus.push({
+            input: this.id,
+            cmd: `start_${keyCode}`,
+            timestamp: Clock.getTimestamp()
+        });
+    }
+
+    released(keyCode) {
+        eventBus.push({
+            input: this.id,
+            cmd: `stop_${keyCode}`,
+            timestamp: Clock.getTimestamp()
+        });
+    }
 }
 
-function renderSystem(state) {
-    document.getElementById('display').innerHTML = JSON.stringify(state, null, 2);
-    return Object.assign({}, state, {render: ((state.render || 0) + 1) % 1000});
-}
-
-function movementSystem(state) {
-    const entities = (state.entities || []).map(entity => {
-        return [canWalk, canJump].reduce((entity, component) => entity.components.includes(component)
-            ? component(entity, state)
-            : entity, entity)
-    });
-    return Object.assign({}, state, {entities, movement: ((state.movement || 0) + 1) % 1000});
-}
-
-/** TIMING OPERATIONS */
-function update(previous = new Date()) {
-    const {updateSpeed} = game;
-    const now = new Date();
-    const delta = Math.min(updateSpeed, updateSpeed - (now.getUTCMilliseconds() - previous.getUTCMilliseconds()));
-    game = game.scene.reduce((game, system) => Object.assign({}, game, system(game)), game);
-    setTimeout(update.bind(update, now), delta);
-}
-
-function render(previous = new Date()) {
-    const {renderSpeed} = game;
-    const now = new Date();
-    const delta = Math.min(renderSpeed, renderSpeed - (now.getUTCMilliseconds() - previous.getUTCMilliseconds()));
-    game = Object.assign({}, renderSystem(game));
-    setTimeout(render.bind(render, now), delta);
-}
-
-function run(game) {
-    run(game.scene.reduce((game, system) => system(game)));
-}
-
-function flush(game, previous = new Date()) {
-    const {updateSpeed} = game;
-    const now = new Date();
-    const delta = Math.min(updateSpeed, updateSpeed - (now.getUTCMilliseconds() - previous.getUTCMilliseconds()));
-    const nextGameState = game.scene.reduce((game, system) => Object.assign({}, game, system(game)), game);
-    setTimeout(flush.bind(flush, nextGameState, now), delta);
-}
-
-/** SCENES */
-const menuScene = [menuSystem, inputSystem];
-const playScene = [eventSystem, inputSystem, movementSystem];
-// const flushScene = [eventSystem, menuSystem, inputSystem, movementSystem, renderSystem];
-
-/** MAIN */
-let game = {
-    updateSpeed: 8,
-    renderSpeed: 16,
-    scene: menuScene,
-    entities: [{id: 'foo1', components: fooEntity}]
-};
-
-update();
-render();
-// flush(Object.assign({}, game, {scene: flushScene}));
+const game = new Game();
+const renderer = new Renderer(document.getElementById('display'));
+const input = new KeyBoardInput();
+const gameClock = new Clock(game.getState().speed, game.update.bind(game)).start();
+const renderClock = new Clock(renderer.speed, () => renderer.draw(game.getState())).start();
