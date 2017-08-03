@@ -1,13 +1,50 @@
+/**
+
+ game_state == {};
+ system == function(game_state) => game_state
+ scene == [system]
+
+ */
+
 const eventBus = [];
-const components = {};
-const entities = {};
+
+function canWalk(entityState, gameState) {
+    const change = {};
+    gameState.events.forEach(event => {
+        if (event.name === 'MOVE NORTH') {
+            change.y = (entityState.y || 0) - 1
+        }
+        if (event.keyCode === 65) {
+            change.x = (entityState.x || 0) - 1
+        }
+        if (event.keyCode === 83) {
+            change.y = (entityState.y || 0) + 1
+        }
+        if (event.keyCode === 68) {
+            change.x = (entityState.x || 0) + 1
+        }
+    });
+    return Object.assign({}, entityState, change);
+}
+
+function canJump(entityState, gameState) {
+    const change = {};
+    gameState.events.forEach(event => {
+        if (event.keyCode === 32) {
+            change.z = (entityState.z || 0) + 1
+        }
+    });
+    return Object.assign({}, entityState, change);
+}
+
+const fooEntity = [canWalk, canJump];
 
 /** SYSTEMS */
 function eventSystem(state) {
     const events = eventBus
         .splice(0, eventBus.length)
         .map(({keyCode, metaKey, shiftKey, altKey}) => ({keyCode, metaKey, shiftKey, altKey}));
-    return Object.assign({}, state, {events: (state.events || []).concat(events)});
+    return Object.assign({}, state, {events});
 }
 
 function inputSystem(state) {
@@ -17,8 +54,8 @@ function inputSystem(state) {
 function menuSystem(state) {
     const change = {menu: ((state.menu || 0) + 1) % 1000};
     if (change.menu >= 360) {
-        change.scene = playScene,
-            window.addEventListener('keydown', eventBus.push.bind(eventBus));
+        change.scene = playScene;
+        window.addEventListener('keydown', eventBus.push.bind(eventBus));
     }
     return Object.assign({}, state, change);
 }
@@ -29,7 +66,12 @@ function renderSystem(state) {
 }
 
 function movementSystem(state) {
-    return Object.assign({}, state, {movement: ((state.movement || 0) + 1) % 1000});
+    const entities = (state.entities || []).map(entity => {
+        return [canWalk, canJump].reduce((entity, component) => entity.components.includes(component)
+            ? component(entity, state)
+            : entity, entity)
+    });
+    return Object.assign({}, state, {entities, movement: ((state.movement || 0) + 1) % 1000});
 }
 
 /** TIMING OPERATIONS */
@@ -49,6 +91,10 @@ function render(previous = new Date()) {
     setTimeout(render.bind(render, now), delta);
 }
 
+function run(game) {
+    run(game.scene.reduce((game, system) => system(game)));
+}
+
 function flush(game, previous = new Date()) {
     const {updateSpeed} = game;
     const now = new Date();
@@ -60,15 +106,16 @@ function flush(game, previous = new Date()) {
 /** SCENES */
 const menuScene = [menuSystem, inputSystem];
 const playScene = [eventSystem, inputSystem, movementSystem];
-const flushScene = [eventSystem, menuSystem, inputSystem, movementSystem, renderSystem];
+// const flushScene = [eventSystem, menuSystem, inputSystem, movementSystem, renderSystem];
 
 /** MAIN */
 let game = {
     updateSpeed: 8,
     renderSpeed: 16,
     scene: menuScene,
+    entities: [{id: 'foo1', components: fooEntity}]
 };
 
-// update();
-// render();
+update();
+render();
 // flush(Object.assign({}, game, {scene: flushScene}));
