@@ -1,8 +1,8 @@
 class Clock {
     constructor(timing, cb) {
-        this.timing = timing;
-        this._lag = this.timing;
-        this.cb = cb;
+        this._timing = timing;
+        this._lag = this._timing;
+        this._cb = cb;
         this._timeout = null;
     }
 
@@ -28,9 +28,9 @@ class Clock {
 
     _tick(last = Clock.getTimestamp()) {
         const current = Clock.getTimestamp();
-        this._lag += current - last - this.timing;
-        const pacing = this.timing - Math.max(0, this._lag);
-        this.cb();
+        this._lag += current - last - this._timing;
+        const pacing = this._timing - Math.max(0, this._lag);
+        this._cb();
         this._timeout = window.setTimeout(this._tick.bind(this, current), pacing);
     }
 }
@@ -52,7 +52,13 @@ function timeSystem(state) {
 
 function eventSystem({events = []}) {
     const newEvents = eventBus.splice(0, eventBus.length);
-    return Object.assign({}, arguments[0], {events: events.concat(newEvents)});
+    events = events
+        .filter(oldEvent => !newEvents.reduce((found, {input, action, state}) => (
+            found || oldEvent.input === input && oldEvent.action === action && oldEvent.state !== state
+        ), false))
+        .filter(({state}) => !(state === 'stop'))
+        .concat(newEvents);
+    return Object.assign({}, arguments[0], {events});
 }
 
 const defaultScene = [timeSystem, eventSystem];
@@ -94,7 +100,8 @@ class KeyBoardInput {
     pressed(keyCode) {
         eventBus.push({
             input: this.id,
-            cmd: `start_${keyCode}`,
+            state: 'start',
+            action: keyCode,
             timestamp: Clock.getTimestamp()
         });
     }
@@ -102,7 +109,8 @@ class KeyBoardInput {
     released(keyCode) {
         eventBus.push({
             input: this.id,
-            cmd: `stop_${keyCode}`,
+            state: 'stop',
+            action: keyCode,
             timestamp: Clock.getTimestamp()
         });
     }
